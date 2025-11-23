@@ -12,6 +12,7 @@ A plugin that displays real-time Argentine exchange rates (Dolar Blue, Dolar Ofi
 - **Comprehensive popup** showing all exchange rates at once
 - **Buy and sell values** displayed for each rate type
 - **Auto-refresh** with configurable interval
+- **Customizable action buttons** in the popup (up to 2 buttons) that open URLs in your default browser
 
 ## Installation
 
@@ -38,12 +39,19 @@ git clone https://github.com/psyreactor/dms-dolarBlue.git dolarBlue
   - Euro Blue
   - Euro Oficial
 - **Refresh Interval**: How often to update the exchange rates in minutes (default: 10, range: 1-60)
+- **Button Text**: Text to display on the first action button in the popup (leave empty to hide)
+- **Button URL**: URL to open when clicking the first button (e.g., https://dolarhoy.com)
+- **Button 2 Text**: Text to display on the second action button in the popup (leave empty to hide)
+- **Button 2 URL**: URL to open when clicking the second button
 
 ### Widget Display
 
 The widget shows:
 - **Bar**: Icon ($ or €) + Buy value + Sell value
-- **Popup**: All four exchange rates (Dolar Blue, Dolar Oficial, Euro Blue, Euro Oficial) with buy and sell values
+- **Popup**: 
+  - All four exchange rates (Dolar Blue, Dolar Oficial, Euro Blue, Euro Oficial) with buy and sell values
+  - Up to 2 customizable action buttons (if configured) that open URLs in your default browser
+  - Buttons are displayed side-by-side when both are configured, or full-width if only one is configured
 
 ## Files
 

@@ -19,6 +19,10 @@ PluginComponent {
     // Settings
     property string rateType: pluginData.rateType || "blue"
     property int refreshInterval: pluginData.refreshInterval || 10
+    property string buttonText: pluginData.buttonText !== undefined ? pluginData.buttonText : "Dolar Hoy"
+    property string buttonUrl: pluginData.buttonUrl !== undefined ? pluginData.buttonUrl : "https://dolarhoy.com"
+    property string buttonText2: pluginData.buttonText2 !== undefined ? pluginData.buttonText2 : "Dolarito"
+    property string buttonUrl2: pluginData.buttonUrl2 !== undefined ? pluginData.buttonUrl2 : "https://dolarito.ar"
     property string displayTitle: {
         switch(rateType) {
             case "blue": return "Dolar Blue";
@@ -221,9 +225,99 @@ PluginComponent {
                         sell: root.allRates.oficial_euro ? root.allRates.oficial_euro.value_sell : "..."
                     }
                 }
+
+                // Custom Buttons
+                Row {
+                    visible: (root.buttonText && root.buttonUrl) || (root.buttonText2 && root.buttonUrl2)
+                    width: parent.width
+                    height: visible ? 48 : 0
+                    spacing: Theme.spacingM
+
+                    // First Button
+                    Rectangle {
+                        visible: root.buttonText && root.buttonUrl
+                        width: root.buttonText2 && root.buttonUrl2 ? (parent.width - Theme.spacingM) / 2 : parent.width
+                        height: 48
+                        radius: Theme.cornerRadius
+                        color: buttonMouse1.containsMouse ? Theme.surfaceContainerHighest : Theme.surfaceContainerHigh
+                        border.width: 0
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: Theme.spacingS
+
+                            DankIcon {
+                                name: "open_in_new"
+                                size: 20
+                                color: Theme.primary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            StyledText {
+                                text: root.buttonText
+                                font.pixelSize: Theme.fontSizeMedium
+                                color: Theme.primary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        MouseArea {
+                            id: buttonMouse1
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.buttonUrl) {
+                                    Quickshell.execDetached(["xdg-open", root.buttonUrl])
+                                }
+                            }
+                        }
+                    }
+
+                    // Second Button
+                    Rectangle {
+                        visible: root.buttonText2 && root.buttonUrl2
+                        width: root.buttonText && root.buttonUrl ? (parent.width - Theme.spacingM) / 2 : parent.width
+                        height: 48
+                        radius: Theme.cornerRadius
+                        color: buttonMouse2.containsMouse ? Theme.surfaceContainerHighest : Theme.surfaceContainerHigh
+                        border.width: 0
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: Theme.spacingS
+
+                            DankIcon {
+                                name: "open_in_new"
+                                size: 20
+                                color: Theme.primary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            StyledText {
+                                text: root.buttonText2
+                                font.pixelSize: Theme.fontSizeMedium
+                                color: Theme.primary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        MouseArea {
+                            id: buttonMouse2
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.buttonUrl2) {
+                                    Quickshell.execDetached(["xdg-open", root.buttonUrl2])
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
     popoutWidth: 450
-    popoutHeight: 260
+    popoutHeight: (root.buttonText && root.buttonUrl) || (root.buttonText2 && root.buttonUrl2) ? 320 : 260
 }

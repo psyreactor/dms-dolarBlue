@@ -46,4 +46,36 @@ PluginSettings {
         unit: "min"
         leftIcon: "schedule"
     }
+
+    StringSetting {
+        settingKey: "buttonText"
+        label: "Button Text"
+        description: "Text to display on the button in the popup (leave empty to hide button)."
+        defaultValue: "Dolar Hoy"
+        placeholder: "e.g., Ver más información"
+    }
+
+    StringSetting {
+        settingKey: "buttonUrl"
+        label: "Button URL"
+        description: "URL to open when clicking the button (e.g., https://dolarhoy.com)."
+        defaultValue: "https://dolarhoy.com"
+        placeholder: "https://example.com"
+    }
+
+    StringSetting {
+        settingKey: "buttonText2"
+        label: "Button 2 Text"
+        description: "Text to display on the second button in the popup (leave empty to hide button)."
+        defaultValue: "Dolarito"
+        placeholder: "e.g., Ver más información"
+    }
+
+    StringSetting {
+        settingKey: "buttonUrl2"
+        label: "Button 2 URL"
+        description: "URL to open when clicking the second button (e.g., https://dolarhoy.com)."
+        defaultValue: "https://dolarito.ar"
+        placeholder: "https://example.com"
+    }
 }
