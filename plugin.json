@@ -1,0 +1,18 @@
+{
+    "id": "dolarBluePlugin",
+    "name": "Dolar Blue",
+    "description": "Show the real-time Dolar Blue and Official exchange rate from Bluelytics.",
+    "version": "1.0.0",
+    "author": "Lucas Mariani",
+    "type": "widget",
+    "capabilities": [
+        "dankbar-widget"
+    ],
+    "component": "./DolarBlueWidget.qml",
+    "icon": "attach_money",
+    "settings": "./DolarBlueSettings.qml",
+    "permissions": [
+        "settings_read",
+        "settings_write"
+    ]
+}
