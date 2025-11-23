@@ -269,6 +269,7 @@ PluginComponent {
                             onClicked: {
                                 if (root.buttonUrl) {
                                     Quickshell.execDetached(["xdg-open", root.buttonUrl])
+                                    root.closePopout()
                                 }
                             }
                         }
@@ -310,6 +311,7 @@ PluginComponent {
                             onClicked: {
                                 if (root.buttonUrl2) {
                                     Quickshell.execDetached(["xdg-open", root.buttonUrl2])
+                                    root.closePopout()
                                 }
                             }
                         }

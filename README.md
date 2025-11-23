@@ -4,6 +4,8 @@ A plugin that displays real-time Argentine exchange rates (Dolar Blue, Dolar Ofi
 
 > _"Argentina, you wouldn't understand..."_
 
+![Screenshot](./screenshot.png)
+
 ## Features
 
 - **Real-time exchange rates** from Bluelytics API
