@@ -39,11 +39,11 @@ PluginSettings {
     SliderSetting {
         settingKey: "refreshInterval"
         label: "Refresh Interval"
-        description: "How often to update the exchange rate (in minutes)."
-        defaultValue: 10
-        minimum: 1
-        maximum: 60
-        unit: "min"
+        description: "Intervalo de actualización del contexto (en segundos)."
+        defaultValue: 15
+        minimum: 10
+        maximum: 600
+        unit: "seg"
         leftIcon: "schedule"
     }
 
