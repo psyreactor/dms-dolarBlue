@@ -5,7 +5,7 @@ import qs.Modules.Plugins
 
 PluginSettings {
     id: root
-    pluginId: "dolarBluePlugin"
+    pluginId: "dolarBlue"
 
     StyledText {
         width: parent.width
