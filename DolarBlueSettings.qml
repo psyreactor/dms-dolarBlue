@@ -39,7 +39,7 @@ PluginSettings {
     SliderSetting {
         settingKey: "refreshInterval"
         label: "Refresh Interval"
-        description: "Intervalo de actualización del contexto (en segundos)."
+        description: "Context refresh interval (in seconds)."
         defaultValue: 15
         minimum: 10
         maximum: 600
