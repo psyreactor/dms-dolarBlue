@@ -2,7 +2,7 @@
     "id": "dolarBlue",
     "name": "Dolar Blue",
     "description": "Show the real-time Dolar Blue and Official exchange rate from Bluelytics.",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "author": "Lucas Mariani",
     "type": "widget",
     "capabilities": [

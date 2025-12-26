@@ -178,13 +178,13 @@ PluginComponent {
     popoutContent: Component {
             Column {
                 anchors.fill: parent
-                anchors.margins: Theme.spacingL
+                anchors.margins: Theme.spacingXS
                 spacing: Theme.spacingL
                 
                 // Header
                 Row {
                     width: parent.width
-                    spacing: Theme.spacingM
+                    spacing: Theme.spacingXS
                     
                     StyledText {
                         text: "Cotizaciones"
@@ -237,7 +237,7 @@ PluginComponent {
                     Rectangle {
                         visible: root.buttonText && root.buttonUrl
                         width: root.buttonText2 && root.buttonUrl2 ? (parent.width - Theme.spacingM) / 2 : parent.width
-                        height: 48
+                        height: 36
                         radius: Theme.cornerRadius
                         color: buttonMouse1.containsMouse ? Theme.surfaceContainerHighest : Theme.surfaceContainerHigh
                         border.width: 0
@@ -279,7 +279,7 @@ PluginComponent {
                     Rectangle {
                         visible: root.buttonText2 && root.buttonUrl2
                         width: root.buttonText && root.buttonUrl ? (parent.width - Theme.spacingM) / 2 : parent.width
-                        height: 48
+                        height: 36
                         radius: Theme.cornerRadius
                         color: buttonMouse2.containsMouse ? Theme.surfaceContainerHighest : Theme.surfaceContainerHigh
                         border.width: 0
