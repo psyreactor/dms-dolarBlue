@@ -1,4 +1,6 @@
 import QtQuick
+import QtQuick.Layouts
+import QtQuick.Shapes
 import Quickshell
 import qs.Common
 import qs.Services
@@ -14,7 +16,13 @@ PluginComponent {
     property string sellValue: "..."
     property var allRates: ({})
     property bool loading: true
-    property string lastUpdate: ""
+    property bool hasError: false
+    property string errorMessage: ""
+    property var lastUpdated: null
+    // Set by the manual refresh button so the toast only fires for a refresh
+    // the user actually asked for, not for every periodic tick.
+    property bool manualRefresh: false
+    property string toastText: ""
 
     // Settings
     property string rateType: pluginData.rateType || "blue"
@@ -23,6 +31,7 @@ PluginComponent {
     property string buttonUrl: pluginData.buttonUrl !== undefined ? pluginData.buttonUrl : "https://dolarhoy.com"
     property string buttonText2: pluginData.buttonText2 !== undefined ? pluginData.buttonText2 : "Dolarito"
     property string buttonUrl2: pluginData.buttonUrl2 !== undefined ? pluginData.buttonUrl2 : "https://dolarito.ar"
+    property string timeFormat: pluginData.timeFormat || "system"
     property string displayTitle: {
         switch(rateType) {
             case "blue": return "Dolar Blue";
@@ -47,30 +56,95 @@ PluginComponent {
         onTriggered: fetchData()
     }
 
+    Timer {
+        id: toastTimer
+        interval: 1800
+    }
+
+    // Guards against a request that never completes leaving `loading` latched.
+    Timer {
+        id: loadingWatchdog
+        interval: 20000
+        repeat: false
+        running: root.loading
+        onTriggered: root.failRefresh("Timed out talking to bluelytics. Will retry.")
+    }
+
+    function showToast(msg) {
+        root.toastText = msg;
+        toastTimer.restart();
+    }
+
+    function getEffectiveTimeFormat() {
+        if (root.timeFormat === "12h") return "12h";
+        if (root.timeFormat === "24h") return "24h";
+
+        const sysFmt = Qt.locale().timeFormat(Locale.ShortFormat);
+        return (sysFmt.indexOf("H") !== -1 || sysFmt.indexOf("k") !== -1) ? "24h" : "12h";
+    }
+
+    function formatHeaderTime(dateObj) {
+        if (!dateObj) return "";
+        return Qt.formatTime(dateObj, getEffectiveTimeFormat() === "24h" ? "HH:mm" : "h:mm AP");
+    }
+
+    function rateFor(key) {
+        return root.allRates && root.allRates[key] ? root.allRates[key] : null;
+    }
+
+    function completeRefresh() {
+        const wasManual = root.manualRefresh;
+        root.manualRefresh = false;
+        root.loading = false;
+        root.hasError = false;
+        root.errorMessage = "";
+        root.lastUpdated = new Date();
+
+        if (wasManual)
+            root.showToast("Cotizaciones actualizadas");
+    }
+
+    // Every failure path lands here. Before, only the success path cleared
+    // `loading`, so a failed request or a missing key left the widget stuck on
+    // "..." for the rest of the session with nothing on screen to say why.
+    function failRefresh(msg) {
+        root.manualRefresh = false;
+        root.loading = false;
+        root.hasError = true;
+        root.errorMessage = msg;
+    }
+
     function fetchData() {
         root.loading = true;
-        var xhr = new XMLHttpRequest();
-        xhr.onreadystatechange = function() {
-            if (xhr.readyState === XMLHttpRequest.DONE) {
-                if (xhr.status === 200) {
-                    try {
-                        var response = JSON.parse(xhr.responseText);
-                        root.allRates = response;
-                        var data = response[root.rateType];
-                        if (data) {
-                            root.buyValue = data.value_buy.toString();
-                            root.sellValue = data.value_sell.toString();
-                            root.lastUpdate = Qt.formatDateTime(new Date(), "HH:mm");
-                            root.loading = false;
-                        }
-                    } catch (e) {
-                        console.error("Error parsing JSON:", e);
-                    }
-                } else {
-                    console.error("Error fetching data:", xhr.status, xhr.statusText);
-                }
+        const xhr = new XMLHttpRequest();
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+
+            if (xhr.status !== 200) {
+                root.failRefresh("Could not reach bluelytics (HTTP " + xhr.status + ").");
+                return;
             }
-        }
+
+            let response;
+            try {
+                response = JSON.parse(xhr.responseText);
+            } catch (e) {
+                root.failRefresh("Bluelytics returned a malformed response.");
+                return;
+            }
+
+            root.allRates = response;
+            const data = response[root.rateType];
+            if (!data) {
+                root.failRefresh("No rate available for \"" + root.rateType + "\".");
+                return;
+            }
+
+            root.buyValue = data.value_buy.toString();
+            root.sellValue = data.value_sell.toString();
+            root.completeRefresh();
+        };
         xhr.open("GET", "https://api.bluelytics.com.ar/v2/latest");
         xhr.send();
     }
@@ -178,318 +252,498 @@ PluginComponent {
         }
     }
 
-    // Rate row modeled after GitHub Notifier's StatRow: accent bar + icon + title + badges
-    component RateStatRow: Item {
-        id: statRow
+    // Row for one rate. Clicking it makes that rate the one shown in the bar,
+    // which until now was only reachable from the settings screen.
+    component RateRow: Item {
+        id: rateRow
 
+        property string rateKey: ""
         property string title: ""
         property url iconSource: Qt.resolvedUrl("dollar.svg")
-        property string buy: "..."
-        property string sell: "..."
         property color accentColor: Theme.primary
+        property int index: 0
+        property int total: 4
+
+        readonly property var rate: root.rateFor(rateKey)
+        readonly property bool isCurrent: root.rateType === rateKey
+        readonly property bool isHovered: rateMa.containsMouse
+        readonly property bool isFirst: index === 0
+        readonly property bool isLast: index === total - 1
 
         width: parent.width
-        height: 44
+        height: 52
 
-        Row {
-            anchors.left: parent.left
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.spacingS
+        Shape {
+            id: rateBg
+            anchors.fill: parent
 
-            Rectangle {
-                width: 4
-                height: 22
-                radius: 2
-                color: accentColor
-                anchors.verticalCenter: parent.verticalCenter
-            }
+            readonly property real innerRadius: 6
+            readonly property real outerRadius: Theme.cornerRadius || 12
+            readonly property real topR: rateRow.isHovered ? (height / 2) : (rateRow.isFirst ? outerRadius : innerRadius)
+            readonly property real bottomR: rateRow.isHovered ? (height / 2) : (rateRow.isLast ? outerRadius : innerRadius)
 
-            DankSVGIcon {
-                source: iconSource
-                size: 20
-                colorOverride: accentColor
-                anchors.verticalCenter: parent.verticalCenter
-            }
+            property real topRAnim: topR
+            Behavior on topRAnim { NumberAnimation { duration: 600; easing.type: Easing.OutExpo } }
+            property real bottomRAnim: bottomR
+            Behavior on bottomRAnim { NumberAnimation { duration: 600; easing.type: Easing.OutExpo } }
 
-            StyledText {
-                text: title
-                font.pixelSize: Theme.fontSizeMedium
-                font.weight: Font.Bold
-                color: Theme.surfaceText
-                anchors.verticalCenter: parent.verticalCenter
+            ShapePath {
+                fillColor: rateRow.isCurrent
+                           ? Qt.rgba(rateRow.accentColor.r, rateRow.accentColor.g, rateRow.accentColor.b, 0.12)
+                           : (rateRow.isHovered
+                              ? Qt.rgba(rateRow.accentColor.r, rateRow.accentColor.g, rateRow.accentColor.b, 0.1)
+                              : Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.04))
+                strokeColor: rateRow.isCurrent
+                             ? Qt.rgba(rateRow.accentColor.r, rateRow.accentColor.g, rateRow.accentColor.b, 0.5)
+                             : (rateRow.isHovered
+                                ? Qt.rgba(rateRow.accentColor.r, rateRow.accentColor.g, rateRow.accentColor.b, 0.4)
+                                : Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.15))
+                strokeWidth: 1
+
+                startX: rateBg.topRAnim + 1; startY: 1
+                PathLine { x: rateBg.width - rateBg.topRAnim - 1; y: 1 }
+                PathArc { x: rateBg.width - 1; y: rateBg.topRAnim + 1; radiusX: rateBg.topRAnim; radiusY: rateBg.topRAnim; direction: PathArc.Clockwise }
+                PathLine { x: rateBg.width - 1; y: rateBg.height - rateBg.bottomRAnim - 1 }
+                PathArc { x: rateBg.width - rateBg.bottomRAnim - 1; y: rateBg.height - 1; radiusX: rateBg.bottomRAnim; radiusY: rateBg.bottomRAnim; direction: PathArc.Clockwise }
+                PathLine { x: rateBg.bottomRAnim + 1; y: rateBg.height - 1 }
+                PathArc { x: 1; y: rateBg.height - rateBg.bottomRAnim - 1; radiusX: rateBg.bottomRAnim; radiusY: rateBg.bottomRAnim; direction: PathArc.Clockwise }
+                PathLine { x: 1; y: rateBg.topRAnim + 1 }
+                PathArc { x: rateBg.topRAnim + 1; y: 1; radiusX: rateBg.topRAnim; radiusY: rateBg.topRAnim; direction: PathArc.Clockwise }
             }
         }
 
-        Row {
+        DankRipple {
+            id: rateRipple
+            anchors.fill: parent
+            cornerRadius: rateBg.topRAnim
+            rippleColor: rateRow.accentColor
+        }
+
+        RowLayout {
+            anchors.left: parent.left
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.spacingXS
+            anchors.leftMargin: Theme.spacingM
+            anchors.rightMargin: Theme.spacingM
+            spacing: Theme.spacingS
+
+            DankIcon {
+                name: rateRow.isCurrent ? "check_circle" : "radio_button_unchecked"
+                size: 16
+                color: rateRow.isCurrent ? rateRow.accentColor : Theme.surfaceVariantText
+                opacity: rateRow.isCurrent ? 1.0 : 0.6
+                Layout.alignment: Qt.AlignVCenter
+            }
+
+            DankSVGIcon {
+                source: rateRow.iconSource
+                size: 18
+                colorOverride: rateRow.accentColor
+                Layout.alignment: Qt.AlignVCenter
+            }
+
+            StyledText {
+                text: rateRow.title
+                font.pixelSize: Theme.fontSizeMedium
+                font.weight: rateRow.isCurrent ? Font.Bold : Font.Medium
+                color: Theme.surfaceText
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                elide: Text.ElideRight
+            }
 
             ValueBadge {
                 label: "C"
-                value: statRow.buy
-                accentColor: statRow.accentColor
-                anchors.verticalCenter: parent.verticalCenter
+                value: rateRow.rate ? rateRow.rate.value_buy.toString() : "..."
+                accentColor: rateRow.accentColor
+                Layout.alignment: Qt.AlignVCenter
             }
 
             ValueBadge {
                 label: "V"
-                value: statRow.sell
-                accentColor: statRow.accentColor
-                anchors.verticalCenter: parent.verticalCenter
+                value: rateRow.rate ? rateRow.rate.value_sell.toString() : "..."
+                accentColor: rateRow.accentColor
+                Layout.alignment: Qt.AlignVCenter
+            }
+        }
+
+        MouseArea {
+            id: rateMa
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: rateRow.isCurrent ? Qt.ArrowCursor : Qt.PointingHandCursor
+            onPressed: m => rateRipple.trigger(m.x, m.y)
+            onClicked: {
+                if (!rateRow.isCurrent)
+                    PluginService.savePluginData("dolarBlue", "rateType", rateRow.rateKey);
             }
         }
     }
 
     popoutContent: Component {
-        Column {
-            width: parent.width
-            spacing: Theme.spacingM
-            topPadding: Theme.spacingM
-            bottomPadding: Theme.spacingM
+        PopoutComponent {
+            headerText: ""
+            showCloseButton: false
 
-            // Header card
             Item {
                 width: parent.width
-                height: 68
+                height: mainCol.implicitHeight
 
-                Rectangle {
-                    anchors.fill: parent
-                    radius: Theme.cornerRadius * 1.5
-                    gradient: Gradient {
-                        GradientStop {
-                            position: 0.0
-                            color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
+                Column {
+                    id: mainCol
+                    width: parent.width
+                    spacing: Theme.spacingM
+                    topPadding: 0
+                    bottomPadding: 2
+
+                    // Header card
+                    StyledRect {
+                        width: parent.width
+                        height: 72
+                        radius: Theme.cornerRadius * 1.5
+                        color: Theme.withAlpha(Theme.surfaceContainerHigh, Theme.popupTransparency)
+                        border.width: 1
+                        border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
+
+                        Row {
+                            anchors.left: parent.left
+                            anchors.leftMargin: Theme.spacingM
+                            anchors.right: headerRefreshBtn.left
+                            anchors.rightMargin: Theme.spacingS
+                            anchors.verticalCenter: parent.verticalCenter
+                            spacing: Theme.spacingM
+
+                            Rectangle {
+                                width: 42
+                                height: 42
+                                radius: 21
+                                anchors.verticalCenter: parent.verticalCenter
+                                color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
+
+                                DankSVGIcon {
+                                    source: root.displayIconSource
+                                    size: 22
+                                    anchors.centerIn: parent
+                                    colorOverride: root.hasError ? Theme.error : Theme.primary
+                                }
+                            }
+
+                            Column {
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
+                                width: parent.width - 42 - Theme.spacingM
+
+                                StyledText {
+                                    width: parent.width
+                                    text: root.displayTitle
+                                    font.bold: true
+                                    font.pixelSize: Theme.fontSizeLarge
+                                    color: root.hasError ? Theme.error : Theme.surfaceText
+                                    elide: Text.ElideRight
+                                }
+
+                                StyledText {
+                                    width: parent.width
+                                    text: root.lastUpdated
+                                          ? ("Bluelytics • Updated " + root.formatHeaderTime(root.lastUpdated))
+                                          : "Bluelytics"
+                                    font.pixelSize: Theme.fontSizeSmall - 1
+                                    color: Theme.primary
+                                    opacity: 0.85
+                                    elide: Text.ElideRight
+                                }
+                            }
                         }
-                        GradientStop {
-                            position: 1.0
-                            color: Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.08)
+
+                        Rectangle {
+                            id: headerRefreshBtn
+                            anchors.right: parent.right
+                            anchors.rightMargin: Theme.spacingM
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: 38
+                            height: 38
+                            radius: Theme.cornerRadius
+                            color: refreshMa.containsMouse
+                                   ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
+                                   : Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.08)
+                            border.width: 1
+                            border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, refreshMa.containsMouse ? 0.3 : 0.15)
+
+                            scale: refreshMa.pressed ? 0.92 : (refreshMa.containsMouse ? 1.05 : 1.0)
+                            Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack } }
+                            Behavior on color { ColorAnimation { duration: 150 } }
+
+                            DankRipple { id: refreshRipple; anchors.fill: parent; cornerRadius: Theme.cornerRadius; rippleColor: Theme.primary }
+
+                            DankSpinner {
+                                size: 20
+                                color: Theme.primary
+                                anchors.centerIn: parent
+                                visible: root.loading
+                            }
+
+                            DankIcon {
+                                name: "refresh"
+                                size: 20
+                                color: Theme.primary
+                                anchors.centerIn: parent
+                                visible: !root.loading
+
+                                rotation: refreshMa.containsMouse ? 180 : 0
+                                Behavior on rotation { NumberAnimation { duration: 250; easing.type: Easing.OutBack } }
+                            }
+
+                            MouseArea {
+                                id: refreshMa
+                                anchors.fill: parent
+                                hoverEnabled: !root.loading
+                                cursorShape: Qt.PointingHandCursor
+                                onPressed: m => refreshRipple.trigger(m.x, m.y)
+                                onClicked: {
+                                    root.manualRefresh = true;
+                                    root.fetchData();
+                                }
+                            }
                         }
                     }
-                    border.width: 1
-                    border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.25)
-                }
 
+                    // Error card
+                    StyledRect {
+                        width: parent.width
+                        visible: root.hasError && root.errorMessage.length > 0
+                        height: Math.max(0, errText.implicitHeight + Theme.spacingM * 2)
+                        radius: Theme.cornerRadius
+                        color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.12)
+                        border.width: 1
+                        border.color: Qt.rgba(Theme.error.r, Theme.error.g, Theme.error.b, 0.4)
+
+                        StyledText {
+                            id: errText
+                            anchors.fill: parent
+                            anchors.margins: Theme.spacingM
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.WordWrap
+                            text: root.errorMessage
+                            color: Theme.error
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+                    }
+
+                    // Rates card
+                    StyledRect {
+                        width: parent.width
+                        height: Math.max(0, ratesCol.implicitHeight + Theme.spacingM * 2)
+                        radius: Theme.cornerRadius
+                        color: Theme.withAlpha(Theme.surfaceContainerHigh, Theme.popupTransparency)
+                        border.width: 1
+                        border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
+
+                        Column {
+                            id: ratesCol
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: Theme.spacingM
+                            spacing: Theme.spacingS
+
+                            RowLayout {
+                                width: parent.width
+                                spacing: Theme.spacingXS
+
+                                DankIcon {
+                                    name: "currency_exchange"
+                                    size: 14
+                                    color: Theme.surfaceText
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
+
+                                StyledText {
+                                    text: "Cotizaciones"
+                                    font.pixelSize: Theme.fontSizeSmall
+                                    font.weight: Font.Bold
+                                    color: Theme.surfaceText
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
+
+                                StyledText {
+                                    text: "click para fijar en la barra"
+                                    font.pixelSize: Theme.fontSizeSmall - 1
+                                    color: Theme.surfaceVariantText
+                                    opacity: 0.7
+                                    Layout.alignment: Qt.AlignVCenter
+                                }
+                            }
+
+                            Column {
+                                width: parent.width
+                                spacing: 4
+
+                                RateRow {
+                                    index: 0
+                                    rateKey: "blue"
+                                    title: "Dolar Blue"
+                                    iconSource: Qt.resolvedUrl("dollar.svg")
+                                    accentColor: Theme.primary
+                                }
+
+                                RateRow {
+                                    index: 1
+                                    rateKey: "oficial"
+                                    title: "Dolar Oficial"
+                                    iconSource: Qt.resolvedUrl("dollar.svg")
+                                    accentColor: Theme.primary
+                                }
+
+                                RateRow {
+                                    index: 2
+                                    rateKey: "blue_euro"
+                                    title: "Euro Blue"
+                                    iconSource: Qt.resolvedUrl("euro.svg")
+                                    accentColor: Theme.secondary
+                                }
+
+                                RateRow {
+                                    index: 3
+                                    rateKey: "oficial_euro"
+                                    title: "Euro Oficial"
+                                    iconSource: Qt.resolvedUrl("euro.svg")
+                                    accentColor: Theme.secondary
+                                }
+                            }
+                        }
+                    }
+
+                // Custom Buttons
                 Row {
-                    anchors.left: parent.left
-                    anchors.leftMargin: Theme.spacingM
-                    anchors.right: refreshButton.left
-                    anchors.rightMargin: Theme.spacingS
-                    anchors.verticalCenter: parent.verticalCenter
+                    visible: (root.buttonText && root.buttonUrl) || (root.buttonText2 && root.buttonUrl2)
+                    width: parent.width
+                    height: visible ? 40 : 0
                     spacing: Theme.spacingM
 
+                    // First Button
                     Rectangle {
-                        width: 40
+                        visible: root.buttonText && root.buttonUrl
+                        width: root.buttonText2 && root.buttonUrl2 ? (parent.width - Theme.spacingM) / 2 : parent.width
                         height: 40
-                        radius: 20
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
-
-                        DankSVGIcon {
-                            source: root.displayIconSource
-                            size: 22
-                            anchors.centerIn: parent
-                            colorOverride: Theme.primary
-                        }
-                    }
-
-                    Column {
-                        width: parent.width - 40 - Theme.spacingM
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 2
-
-                        StyledText {
-                            width: parent.width
-                            text: "Cotizaciones"
-                            font.bold: true
-                            font.pixelSize: Theme.fontSizeLarge
-                            color: Theme.surfaceText
-                            elide: Text.ElideRight
-                        }
-
-                        StyledText {
-                            width: parent.width
-                            text: root.loading ? "Actualizando..." : (root.lastUpdate ? "Actualizado " + root.lastUpdate : "Bluelytics")
-                            font.pixelSize: Theme.fontSizeSmall
-                            color: Theme.surfaceVariantText
-                            elide: Text.ElideRight
-                        }
-                    }
-                }
-
-                // Refresh button
-                Item {
-                    id: refreshButton
-                    width: 38
-                    height: 38
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.spacingM
-                    anchors.verticalCenter: parent.verticalCenter
-                    scale: refreshArea.pressed ? 0.9 : (refreshArea.containsMouse ? 1.1 : 1.0)
-                    Behavior on scale { NumberAnimation { duration: 150; easing.type: Easing.OutBack } }
-
-                    MouseArea {
-                        id: refreshArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.fetchData()
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: Theme.cornerRadius
-                        color: refreshArea.containsMouse ? Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15) : Qt.rgba(Theme.surfaceContainer.r, Theme.surfaceContainer.g, Theme.surfaceContainer.b, 0.4)
+                        radius: Theme.cornerRadius * 1.5
+                        color: Qt.rgba(Theme.surfaceContainer.r, Theme.surfaceContainer.g, Theme.surfaceContainer.b, buttonMouse1.containsMouse ? 0.8 : 0.5)
                         border.width: 1
-                        border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, refreshArea.containsMouse ? 0.3 : 0.15)
+                        border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
                         Behavior on color { ColorAnimation { duration: 150 } }
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
-                    }
 
-                    DankIcon {
-                        id: refreshIcon
-                        name: "refresh"
-                        size: 20
-                        color: Theme.primary
-                        anchors.centerIn: parent
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: Theme.spacingS
 
-                        RotationAnimation on rotation {
-                            from: 0
-                            to: 360
-                            duration: 1000
-                            loops: Animation.Infinite
-                            running: root.loading
-                        }
-                    }
-                }
-            }
+                            DankIcon {
+                                name: "open_in_new"
+                                size: 18
+                                color: Theme.primary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
 
-            // Rates
-            RateStatRow {
-                title: "Dolar Blue"
-                iconSource: Qt.resolvedUrl("dollar.svg")
-                accentColor: Theme.primary
-                buy: root.allRates.blue ? root.allRates.blue.value_buy : "..."
-                sell: root.allRates.blue ? root.allRates.blue.value_sell : "..."
-            }
-
-            RateStatRow {
-                title: "Dolar Oficial"
-                iconSource: Qt.resolvedUrl("dollar.svg")
-                accentColor: Theme.primary
-                buy: root.allRates.oficial ? root.allRates.oficial.value_buy : "..."
-                sell: root.allRates.oficial ? root.allRates.oficial.value_sell : "..."
-            }
-
-            RateStatRow {
-                title: "Euro Blue"
-                iconSource: Qt.resolvedUrl("euro.svg")
-                accentColor: Theme.secondary
-                buy: root.allRates.blue_euro ? root.allRates.blue_euro.value_buy : "..."
-                sell: root.allRates.blue_euro ? root.allRates.blue_euro.value_sell : "..."
-            }
-
-            RateStatRow {
-                title: "Euro Oficial"
-                iconSource: Qt.resolvedUrl("euro.svg")
-                accentColor: Theme.secondary
-                buy: root.allRates.oficial_euro ? root.allRates.oficial_euro.value_buy : "..."
-                sell: root.allRates.oficial_euro ? root.allRates.oficial_euro.value_sell : "..."
-            }
-
-            // Custom Buttons
-            Row {
-                visible: (root.buttonText && root.buttonUrl) || (root.buttonText2 && root.buttonUrl2)
-                width: parent.width
-                height: visible ? 40 : 0
-                spacing: Theme.spacingM
-
-                // First Button
-                Rectangle {
-                    visible: root.buttonText && root.buttonUrl
-                    width: root.buttonText2 && root.buttonUrl2 ? (parent.width - Theme.spacingM) / 2 : parent.width
-                    height: 40
-                    radius: Theme.cornerRadius * 1.5
-                    color: Qt.rgba(Theme.surfaceContainer.r, Theme.surfaceContainer.g, Theme.surfaceContainer.b, buttonMouse1.containsMouse ? 0.8 : 0.5)
-                    border.width: 1
-                    border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.15)
-                    Behavior on color { ColorAnimation { duration: 150 } }
-
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: Theme.spacingS
-
-                        DankIcon {
-                            name: "open_in_new"
-                            size: 18
-                            color: Theme.primary
-                            anchors.verticalCenter: parent.verticalCenter
+                            StyledText {
+                                text: root.buttonText
+                                font.pixelSize: Theme.fontSizeMedium
+                                font.weight: Font.Medium
+                                color: Theme.primary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
                         }
 
-                        StyledText {
-                            text: root.buttonText
-                            font.pixelSize: Theme.fontSizeMedium
-                            font.weight: Font.Medium
-                            color: Theme.primary
-                            anchors.verticalCenter: parent.verticalCenter
+                        MouseArea {
+                            id: buttonMouse1
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.buttonUrl) {
+                                    Quickshell.execDetached(["xdg-open", root.buttonUrl])
+                                    root.closePopout()
+                                }
+                            }
                         }
                     }
 
-                    MouseArea {
-                        id: buttonMouse1
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (root.buttonUrl) {
-                                Quickshell.execDetached(["xdg-open", root.buttonUrl])
-                                root.closePopout()
+                    // Second Button
+                    Rectangle {
+                        visible: root.buttonText2 && root.buttonUrl2
+                        width: root.buttonText && root.buttonUrl ? (parent.width - Theme.spacingM) / 2 : parent.width
+                        height: 40
+                        radius: Theme.cornerRadius * 1.5
+                        color: Qt.rgba(Theme.surfaceContainer.r, Theme.surfaceContainer.g, Theme.surfaceContainer.b, buttonMouse2.containsMouse ? 0.8 : 0.5)
+                        border.width: 1
+                        border.color: Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.15)
+                        Behavior on color { ColorAnimation { duration: 150 } }
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: Theme.spacingS
+
+                            DankIcon {
+                                name: "open_in_new"
+                                size: 18
+                                color: Theme.secondary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+
+                            StyledText {
+                                text: root.buttonText2
+                                font.pixelSize: Theme.fontSizeMedium
+                                font.weight: Font.Medium
+                                color: Theme.secondary
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                        }
+
+                        MouseArea {
+                            id: buttonMouse2
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.buttonUrl2) {
+                                    Quickshell.execDetached(["xdg-open", root.buttonUrl2])
+                                    root.closePopout()
+                                }
                             }
                         }
                     }
                 }
+                }
 
-                // Second Button
+                // Toast, shown only for a refresh the user asked for
                 Rectangle {
-                    visible: root.buttonText2 && root.buttonUrl2
-                    width: root.buttonText && root.buttonUrl ? (parent.width - Theme.spacingM) / 2 : parent.width
-                    height: 40
-                    radius: Theme.cornerRadius * 1.5
-                    color: Qt.rgba(Theme.surfaceContainer.r, Theme.surfaceContainer.g, Theme.surfaceContainer.b, buttonMouse2.containsMouse ? 0.8 : 0.5)
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: Theme.spacingS
+                    height: 32
+                    width: toastLayout.implicitWidth + Theme.spacingM * 2
+                    radius: height / 2
+                    color: Qt.rgba(Theme.surfaceContainerHighest.r, Theme.surfaceContainerHighest.g, Theme.surfaceContainerHighest.b, 0.95)
                     border.width: 1
-                    border.color: Qt.rgba(Theme.secondary.r, Theme.secondary.g, Theme.secondary.b, 0.15)
-                    Behavior on color { ColorAnimation { duration: 150 } }
+                    border.color: Qt.rgba(Theme.primary.r, Theme.primary.g, Theme.primary.b, 0.4)
+                    z: 999
+                    opacity: toastTimer.running ? 1.0 : 0.0
+                    scale: toastTimer.running ? 1.0 : 0.75
 
-                    Row {
+                    Behavior on opacity { NumberAnimation { duration: 200 } }
+                    Behavior on scale { NumberAnimation { duration: 200; easing.type: Easing.OutBack } }
+
+                    RowLayout {
+                        id: toastLayout
                         anchors.centerIn: parent
-                        spacing: Theme.spacingS
+                        spacing: Theme.spacingXS
 
-                        DankIcon {
-                            name: "open_in_new"
-                            size: 18
-                            color: Theme.secondary
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+                        DankIcon { name: "info"; size: 16; color: Theme.primary }
 
                         StyledText {
-                            text: root.buttonText2
-                            font.pixelSize: Theme.fontSizeMedium
-                            font.weight: Font.Medium
-                            color: Theme.secondary
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
-
-                    MouseArea {
-                        id: buttonMouse2
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            if (root.buttonUrl2) {
-                                Quickshell.execDetached(["xdg-open", root.buttonUrl2])
-                                root.closePopout()
-                            }
+                            text: root.toastText
+                            font.pixelSize: Theme.fontSizeSmall
+                            font.weight: Font.Bold
+                            color: Theme.surfaceText
                         }
                     }
                 }
@@ -497,6 +751,7 @@ PluginComponent {
         }
     }
 
+
     popoutWidth: 420
-    popoutHeight: (root.buttonText && root.buttonUrl) || (root.buttonText2 && root.buttonUrl2) ? 380 : 320
+    popoutHeight: 0
 }
