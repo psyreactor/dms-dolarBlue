@@ -225,9 +225,13 @@ PluginComponent {
         property string value: "..."
         property color accentColor: Theme.primary
 
-        width: badgeContent.width + Theme.spacingM
-        height: 24
-        radius: 12
+        // Implicit, not explicit: QtQuick.Layouts ignores width/height on its
+        // children and sizes them from the implicit hints, so an explicit width
+        // collapsed this to zero inside RateRow's RowLayout and the text spilled
+        // out of the pill. Implicit sizing works in a plain Row too.
+        implicitWidth: badgeContent.implicitWidth + Theme.spacingM
+        implicitHeight: 24
+        radius: height / 2
         color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.15)
 
         Row {
