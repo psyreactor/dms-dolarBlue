@@ -91,6 +91,11 @@ If the request fails, returns a non-200 status, or comes back without the
 configured rate, the popup shows an error card explaining which of those
 happened. A watchdog covers a request that never completes at all.
 
+Each widget instance owns its request: with the widget on more than one bar, or
+on more than one monitor, the instances fetch independently. A response that
+arrives after a bar is reconfigured or the plugin is reloaded is discarded
+rather than applied to a torn-down widget.
+
 ## Data Format
 
 The API returns data in the following format:
