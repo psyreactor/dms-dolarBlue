@@ -121,6 +121,12 @@ PluginComponent {
             if (xhr.readyState !== XMLHttpRequest.DONE)
                 return;
 
+            // Reloading the plugin destroys this instance while the request is
+            // still in flight; without this the handler would dereference a
+            // null root.
+            if (!root)
+                return;
+
             if (xhr.status !== 200) {
                 root.failRefresh("Could not reach bluelytics (HTTP " + xhr.status + ").");
                 return;
